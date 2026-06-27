@@ -1,0 +1,56 @@
+name: Deploy MCP server to Cloud Run
+
+# Builds deploy/Dockerfile and deploys to Cloud Run on push to main.
+# Auth is keyless via Workload Identity Federation — no SA JSON in GitHub.
+# Run deploy/gcp-wif-setup.sh once, then add the two repo secrets it prints:
+#   GCP_WIF_PROVIDER, GCP_SERVICE_ACCOUNT
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/**'
+      - '.github/workflows/deploy-cloudrun.yml'
+  workflow_dispatch:
+
+env:
+  SERVICE: paperbanana-mcp
+  REGION: europe-west1
+
+permissions:
+  contents: read
+  id-token: write   # required for Workload Identity Federation
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - id: deploy
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE }}
+          region: ${{ env.REGION }}
+          source: ./deploy
+          secrets: |
+            OPENAI_API_KEY=openai-key:latest
+            GOOGLE_API_KEY=google-key:latest
+          flags: >-
+            --port=8080
+            --timeout=3600
+            --min-instances=1
+            --max-instances=3
+            --cpu=2
+            --memory=2Gi
+            --no-cpu-throttling
+            --no-allow-unauthenticated
+
+      - name: Show service URL
+        run: echo "Deployed to ${{ steps.deploy.outputs.url }} (MCP endpoint ${{ steps.deploy.outputs.url }}/mcp)"
